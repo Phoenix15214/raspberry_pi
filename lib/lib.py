@@ -8,7 +8,7 @@ FFT_HIGHPASS, FFT_LOWPASS = 0, 1
 # 傅里叶变换有关函数
 def fft_filtering(img, radius=30, mode=FFT_HIGHPASS):
     """
-    对输入图像进行高通滤波处理，增强图像的边缘和细节。
+    对输入图像进行高通滤波处理，增强图像的边缘和细节。默认高通滤波。
     参数:
         img: 输入图像，灰度图与彩色图均可。
         radius: 高通滤波器的半径，默认为30。
