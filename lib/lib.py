@@ -1,12 +1,15 @@
 import cv2
 import numpy as np
+from enum import Enum
 
 # 傅里叶变换有关参数
-FFT_HIGHPASS, FFT_LOWPASS = 0, 1
-
+class FFT(Enum):
+    FFT_HIGHPASS = 0
+    FFT_LOWPASS = 1
+    
 
 # 傅里叶变换有关函数
-def fft_filtering(img, radius=30, mode=FFT_HIGHPASS):
+def fft_filtering(img, radius=30, mode=FFT.FFT_HIGHPASS):
     """
     对输入图像进行高通滤波处理，增强图像的边缘和细节。默认高通滤波。
     参数:
@@ -15,6 +18,8 @@ def fft_filtering(img, radius=30, mode=FFT_HIGHPASS):
     返回:
         处理后的图像。
     """
+    if img is None:
+        raise ValueError("输入图像不能为空")
     if(len(img.shape) == 3):
         img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     elif(len(img.shape) == 2):
@@ -25,8 +30,10 @@ def fft_filtering(img, radius=30, mode=FFT_HIGHPASS):
     rows, cols = img.shape
     crow, ccol = rows // 2 , cols // 2
     
-    if(radius <= 0):
+    if(radius < 0):
         raise ValueError("半径必须为正整数")
+    elif radius == 0:
+        radius = 1
     elif(radius > min(crow, ccol)):
         raise ValueError("半径过大，无法应用滤波器")
     
@@ -34,9 +41,9 @@ def fft_filtering(img, radius=30, mode=FFT_HIGHPASS):
     
     dft = cv2.dft(img_float32, flags=cv2.DFT_COMPLEX_OUTPUT)
     dft_shift = np.fft.fftshift(dft)
-    if mode not in [FFT_HIGHPASS, FFT_LOWPASS]:
+    if mode not in [FFT.FFT_HIGHPASS, FFT.FFT_LOWPASS]:
         raise ValueError("mode参数必须为FFT_HIGHPASS或FFT_LOWPASS")
-    if mode == FFT_HIGHPASS:
+    if mode == FFT.FFT_LOWPASS:
         mask = np.zeros((rows, cols, 2), np.uint8)
         cv2.circle(mask, (ccol, crow), radius, (1, 1, 1), -1)
     else:
@@ -53,20 +60,24 @@ def fft_filtering(img, radius=30, mode=FFT_HIGHPASS):
     return img_back
 
 # 模板匹配有关函数
-def template_matching(img, templates, min_scale=0.7,num_scale=5, method=cv2.TM_CCOEFF_NORMED):
+def template_matching(img, templates, threshold=0.5, min_scale=0.7,num_scale=5, method=cv2.TM_CCOEFF_NORMED):
     """
     在输入图像中查找与模板图像匹配的区域。
     参数:
         img: 输入图像，灰度图与彩色图均可。
         template: 模板图像，必须为灰度图。
-        method: 模板匹配方法，默认为cv2.TM_CCOEFF_NORMED。
+        threshold:模板匹配阈值,默认为0.5。
+        min_scale:在多尺度匹配中最小尺度,默认为0.7。
+        num_scale:多尺度匹配中的尺度数量,默认为5。
+        method: 模板匹配方法,默认为cv2.TM_CCOEFF_NORMED。
     返回:
-        匹配结果图像和匹配位置的左上角坐标。
+        最佳匹配结果在模板中的索引。
     """
+    
     best_template = []
     best_index = 0
-
-    
+    if img is None:
+        raise ValueError("输入图像不能为空")
     if (img.ndim not in [2, 3]):
         raise ValueError("输入图像必须为灰度图或彩色图")
     
@@ -89,4 +100,4 @@ def template_matching(img, templates, min_scale=0.7,num_scale=5, method=cv2.TM_C
 
     best_index = np.argmax(best_template)
 
-    return best_index
+    return best_index if best_template[best_index] > threshold else -1
