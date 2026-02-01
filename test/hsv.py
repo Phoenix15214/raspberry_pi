@@ -1,6 +1,10 @@
 import cv2
 import numpy as np
 import os
+import sys
+script_dir = os.path.dirname(os.path.abspath(__file__))
+os.chdir(script_dir)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # HSV范围
 RED_LOWER1 = np.array([0, 43, 46])
