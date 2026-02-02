@@ -5,7 +5,7 @@ os.chdir(script_dir)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import cv2
 import numpy as np
-import lib.lib as lb
+import process_lib.image_lib as lb
 
 
 img = cv2.imread("test_canny.png")
