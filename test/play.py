@@ -1,7 +1,7 @@
 import dxcam
 import cv2
+import pydirectinput as pdi
 import win32api
-import win32con
 import numpy as np
 import time
 import sys
@@ -43,7 +43,7 @@ class ScreenCaptureDXCam:
         if self.frame_count % 1 == 0:
             elapsed = time.time() - self.start_time
             self.fps = self.frame_count / elapsed
-            print(f"FPS: {self.fps:.1f}")
+            # print(f"FPS: {self.fps:.1f}")
             
         return frame
     
@@ -67,9 +67,7 @@ accumulatey = 0.0
 start_time = time.time()
 
 while True:
-    start = time.time()
     frame = camera.get_latest_frame()
-    # print(time.time() - start)
     if frame is not None:
         frame = cv2.resize(frame, None, fx=0.2, fy=0.2)
         blue = lb.color_extraction_dynamic(frame, np.array([78, 43, 46]), np.array([99, 255, 255]))
@@ -98,26 +96,10 @@ while True:
             movey = -pidy.Cal_PID(target[1]) * 5
             accumulatex += movex
             accumulatey += movey
-            
-            # 使用win32api移动鼠标
-            if abs(accumulatex) >= 1 or abs(accumulatey) >= 1:
-                # 获取当前鼠标位置
-                current_x, current_y = win32api.GetCursorPos()
-                
-                # 计算新的位置
-                new_x = current_x + int(accumulatex)
-                new_y = current_y + int(accumulatey)
-                
-                # 移动鼠标
-                win32api.SetCursorPos((new_x, new_y))
-                
-                # 重置累积值
-                accumulatex = 0.0
-                accumulatey = 0.0
-            
-            # 使用win32api模拟按键
-            # win32api.keybd_event(0x48, 0, 0, 0)  # H键按下
-            # win32api.keybd_event(0x48, 0, win32con.KEYEVENTF_KEYUP, 0)  # H键释放
+            start = time.time()
+            pdi.moveRel(int(accumulatex), int(accumulatey), 0.1)
+            pdi.press('h')
+            print(time.time() - start)
         else:
             pass
         binary = cv2.resize(binary, None, fx=0.4, fy=0.4)
