@@ -19,5 +19,5 @@ import time
 # cv2.destroyAllWindows()
 start_time = time.time()
 while time.time() - start_time < 15:
-    pdi.click(1280, 800, button='left')
+    pdi.moveRel(100, 0, 1)
     time.sleep(1)

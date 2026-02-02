@@ -1,7 +1,7 @@
 import dxcam
 import cv2
-import pydirectinput as pdi
 import win32api
+import win32con
 import numpy as np
 import time
 import sys
@@ -54,20 +54,28 @@ class ScreenCaptureDXCam:
 MIN_CONTOUR_AREA = 200
 CENTER_WIDTH = 1280 / 5
 CENTER_HEIGHT = 800 / 5
-RUN_TIME = 15
+RUN_TIME = 40
 
 # 使用示例
 camera = ScreenCaptureDXCam()
 camera.start(target_fps=60)
-pidx = cb.PID_Inc(0.8, 0.005, 0.0, CENTER_WIDTH,2,integral_limit=100,min_output=1)
-pidy = cb.PID_Inc(0.8, 0.005, 0.0, CENTER_HEIGHT,2,integral_limit=100,min_output=1)
+pidx = cb.PID_Inc(0.6, 0.0, 0.0, CENTER_WIDTH,2,integral_limit=100,min_output=1)
+pidy = cb.PID_Inc(0.6, 0.0, 0.0, CENTER_HEIGHT,2,integral_limit=100,min_output=1)
 accumulatex = 0.0
 accumulatey = 0.0
 
+# H键的虚拟键码是0x48
+VK_H = 0x48
+
 start_time = time.time()
 
+# 初始化一个变量来记录上次按键时间
+last_key_time = 0
+
 while True:
+    start = time.time()
     frame = camera.get_latest_frame()
+    # print(time.time() - start)
     if frame is not None:
         frame = cv2.resize(frame, None, fx=0.2, fy=0.2)
         blue = lb.color_extraction_dynamic(frame, np.array([78, 43, 46]), np.array([99, 255, 255]))
@@ -80,7 +88,7 @@ while True:
             if area > MIN_CONTOUR_AREA:
                 (x, y), radius = cv2.minEnclosingCircle(contour)
                 circle_area = np.pi * radius * radius
-                if area != 0 and abs((area - circle_area)) / area < 0.2:
+                if True:# area != 0 and abs((area - circle_area)) / area < 0.2:
                     M = cv2.moments(contour)
                     if M["m00"] != 0:
                         cx = int(M["m10"] / M["m00"])
@@ -90,16 +98,24 @@ while True:
         if valid_contour_centers:
             valid_contour_centers = np.asarray(valid_contour_centers)
             target = valid_contour_centers[cb.Get_Closest_Target([CENTER_WIDTH, CENTER_HEIGHT], valid_contour_centers)]
+            aim_distance = np.linalg.norm([CENTER_WIDTH, CENTER_HEIGHT] - target)
+            if abs(aim_distance) < 15:
+                # H键按下
+                win32api.keybd_event(VK_H, 0, 0, 0)
+                # 短暂延迟后释放
+                time.sleep(0.01)  # 10ms延迟
+                win32api.keybd_event(VK_H, 0, win32con.KEYEVENTF_KEYUP, 0)
             pidx.frequency = camera.fps
             pidy.frequency = camera.fps
-            movex = -pidx.Cal_PID(target[0]) * 5
-            movey = -pidy.Cal_PID(target[1]) * 5
-            accumulatex += movex
-            accumulatey += movey
-            start = time.time()
-            pdi.moveRel(int(accumulatex), int(accumulatey), 0.01)
-            pdi.press('h')
-            print(time.time() - start)
+            movex = -int(pidx.Cal_PID(target[0]) * 5)
+            movey = -int(pidy.Cal_PID(target[1]) * 5)
+            move_distance = np.array([movex, movey])
+            distance = np.linalg.norm(target - move_distance)
+
+            if movex != 0 or movey != 0:
+                # 执行相对移动
+                win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, movex, movey, 0, 0)
+
         else:
             pass
         binary = cv2.resize(binary, None, fx=0.4, fy=0.4)
