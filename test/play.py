@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import process_lib.control_lib as cb
 import process_lib.image_lib as lb
 
+
 class ScreenCaptureDXCam:
     def __init__(self, region=None, output_color="BGR"):
         """
@@ -39,11 +40,11 @@ class ScreenCaptureDXCam:
         frame = self.camera.grab()
         
         # 计算FPS
-        self.frame_count += 1
-        if self.frame_count % 1 == 0:
-            elapsed = time.time() - self.start_time
-            self.fps = self.frame_count / elapsed
-            # print(f"FPS: {self.fps:.1f}")
+        # self.frame_count += 1
+        # if self.frame_count % 1 == 0:
+        #     elapsed = time.time() - self.start_time
+        #     self.fps = self.frame_count / elapsed
+        #     print(f"FPS: {self.fps:.1f}")
             
         return frame
     
@@ -54,13 +55,15 @@ class ScreenCaptureDXCam:
 MIN_CONTOUR_AREA = 200
 CENTER_WIDTH = 1280 / 5
 CENTER_HEIGHT = 800 / 5
-RUN_TIME = 15
+RUN_TIME = 70
+# should_move = True
+pdi.PAUSE = 0.001
 
 # 使用示例
 camera = ScreenCaptureDXCam()
 camera.start(target_fps=60)
-pidx = cb.PID_Inc(0.8, 0.005, 0.0, CENTER_WIDTH,2,integral_limit=100,min_output=1)
-pidy = cb.PID_Inc(0.8, 0.005, 0.0, CENTER_HEIGHT,2,integral_limit=100,min_output=1)
+pidx = cb.PID_Inc(0.68, 0.0, 0.0, CENTER_WIDTH,2,integral_limit=120,min_output=0.2)
+pidy = cb.PID_Inc(0.68, 0.0, 0.0, CENTER_HEIGHT,2,integral_limit=120,min_output=0.2)
 accumulatex = 0.0
 accumulatey = 0.0
 
@@ -80,26 +83,36 @@ while True:
             if area > MIN_CONTOUR_AREA:
                 (x, y), radius = cv2.minEnclosingCircle(contour)
                 circle_area = np.pi * radius * radius
-                if area != 0 and abs((area - circle_area)) / area < 0.2:
+                if True:# area != 0 and abs((area - circle_area)) / area < 0.2:
                     M = cv2.moments(contour)
                     if M["m00"] != 0:
                         cx = int(M["m10"] / M["m00"])
                         cy = int(M["m01"] / M["m00"])
                         valid_contour_centers.append([cx, cy])
-                        # print(f"x坐标:{cx}, y坐标:{cy},面积:{area}")
         if valid_contour_centers:
             valid_contour_centers = np.asarray(valid_contour_centers)
-            target = valid_contour_centers[cb.Get_Closest_Target([CENTER_WIDTH, CENTER_HEIGHT], valid_contour_centers)]
+            valid_index = cb.Get_Closest_Target([CENTER_WIDTH, CENTER_HEIGHT], valid_contour_centers)
+            target = valid_contour_centers[valid_index]
+            aim_distance = np.linalg.norm(np.asarray([CENTER_WIDTH, CENTER_HEIGHT]) - target)
+            # print(aim_distance)
+            if abs(aim_distance) < 9:
+                pdi.press('h')
+                valid_contour_centers[valid_index] = 114514
+                valid_index = cb.Get_Closest_Target([CENTER_WIDTH, CENTER_HEIGHT], valid_contour_centers)
+                target = valid_contour_centers[valid_index]
+                # should_move = False
             pidx.frequency = camera.fps
             pidy.frequency = camera.fps
-            movex = -pidx.Cal_PID(target[0]) * 5
-            movey = -pidy.Cal_PID(target[1]) * 5
+            movex = -int(pidx.Cal_PID(target[0]) * 5)
+            movey = -int(pidy.Cal_PID(target[1]) * 5)
             accumulatex += movex
             accumulatey += movey
-            start = time.time()
-            pdi.moveRel(int(accumulatex), int(accumulatey), 0.01)
-            pdi.press('h')
-            print(time.time() - start)
+            # print(f"x移动{accumulatex}, y移动{accumulatey},帧率:{camera.fps:.1f}FPS")
+            # start = time.time()
+            pdi.moveRel(int(accumulatex), int(accumulatey), 0.003)
+
+            #pdi.press('h')
+            # print(time.time() - start)
         else:
             pass
         binary = cv2.resize(binary, None, fx=0.4, fy=0.4)

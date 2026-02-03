@@ -54,7 +54,7 @@ class ScreenCaptureDXCam:
 MIN_CONTOUR_AREA = 200
 CENTER_WIDTH = 1280 / 5
 CENTER_HEIGHT = 800 / 5
-RUN_TIME = 40
+RUN_TIME = 70
 
 # 使用示例
 camera = ScreenCaptureDXCam()
@@ -99,7 +99,7 @@ while True:
             valid_contour_centers = np.asarray(valid_contour_centers)
             target = valid_contour_centers[cb.Get_Closest_Target([CENTER_WIDTH, CENTER_HEIGHT], valid_contour_centers)]
             aim_distance = np.linalg.norm([CENTER_WIDTH, CENTER_HEIGHT] - target)
-            if abs(aim_distance) < 15:
+            if abs(aim_distance) < 10:
                 # H键按下
                 win32api.keybd_event(VK_H, 0, 0, 0)
                 # 短暂延迟后释放
