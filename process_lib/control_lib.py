@@ -36,7 +36,7 @@ class PID_Inc():
             return max(-self.integral_limit, min(self.integral_limit, self.output_integral))
 
 class PID_Loc():
-    def __init__(self, kp, ki, kd, goal, frequency, integral_limit=1000, output_limit=2000, min_output=10.0):
+    def __init__(self, kp, ki, kd, goal, frequency, integral_limit=1000, output_limit=2000, min_output=10):
         self.frequency = frequency
         self.kp = kp
         self.ki = ki / self.frequency

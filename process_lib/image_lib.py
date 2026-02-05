@@ -40,6 +40,11 @@ BROWN_UPPER = np.array([20, 200, 150])
 GRAY_LOWER = np.array([0, 0, 50])
 GRAY_UPPER = np.array([180, 50, 200])
 
+# 中心点计算相关参数
+CENTER_ALL = 0
+CENTER_MAX = 1
+CENTER_SINGLE = 2
+
 
 
 # 傅里叶变换有关函数
@@ -150,6 +155,14 @@ def Create_Arr(*args):
 
 # 颜色提取相关函数
 def Color_Extraction(img, color=RED):
+    """
+    提取图片中的特定颜色。
+    参数:
+        img:提取颜色的图像(BGR格式)。
+        color:提取的颜色,默认为红色。
+    返回:
+        提取颜色后的BGR图像。
+    """
     img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     if color == RED:
         mask = cv2.inRange(img_hsv, RED_LOWER1, RED_UPPER1) + cv2.inRange(img_hsv, RED_LOWER2, RED_UPPER2)
@@ -178,9 +191,71 @@ def Color_Extraction(img, color=RED):
 
     return result
 
-def color_extraction_dynamic(img, hsv_lower, hsv_upper):
+def Color_Extraction_Dynamic(img, hsv_lower, hsv_upper):
+    """
+    提取图片中的特定颜色(自定HSV阈值)
+    参数:
+        img:提取颜色的图像(BGR格式)。
+        hsv_lower:HSV的下限阈值。
+        hsv_upper:HSV的上限阈值。
+    返回:
+        提取颜色后的BGR图像。
+    """
     img_hsv = cv2.cvtColor(img,cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(img_hsv, hsv_lower, hsv_upper)
     result = cv2.bitwise_and(img, img, mask=mask)
 
     return result
+
+# 中心点计算相关函数
+
+def _cal_single_center(contour):
+    """
+    内部函数,计算轮廓的中心坐标。
+    参数:
+        contour:需要计算中心值的轮廓。
+    返回:
+        轮廓的中心x值、y值坐标。失败时返回-1, -1。
+    """
+    M = cv2.moments(contour)
+    if M['m00'] > 0:
+        return int(M['m10'] / M['m00']), int(M['m01'] / M['m00'])
+    else:
+        return -1, -1
+
+def Get_Center_Point(contour, mode=CENTER_MAX):
+    """
+    提取二值化图像中的中心值坐标。
+    参数:
+        contour:需要计算中心值的轮廓。CENTER_SINGLE模式下为单个轮廓,其他情况下为轮廓列表。
+    返回:
+        轮廓的中心x值、y值坐标。失败时返回-1, -1。
+    """
+    cx, cy = 0.0, 0.0
+    if not contour:
+        return -1, -1
+    if mode == CENTER_SINGLE:
+        return _cal_single_center(contour)
+        
+    elif mode == CENTER_MAX:
+        max_contour = max(contour, key=cv2.contourArea)
+        return _cal_single_center(max_contour)
+    
+    elif mode == CENTER_ALL:
+        total_area = 0
+        for cnt in contour:
+            M = cv2.moments(cnt)
+            if M['m00'] > 0:
+                total_area += M["m00"]
+                cx += M['m10']
+                cy += M['m01']
+            else:
+                continue
+        if total_area != 0:
+            cx = int(cx / total_area)
+            cy = int(cy / total_area)
+            return cx, cy
+        else:
+            return -1, -1
+    else:
+        raise ValueError("mode参数不存在")

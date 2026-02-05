@@ -1,7 +1,7 @@
 import dxcam
 import cv2
 import pydirectinput as pdi
-import win32api
+# import win32api
 import numpy as np
 import time
 import sys
@@ -40,11 +40,11 @@ class ScreenCaptureDXCam:
         frame = self.camera.grab()
         
         # 计算FPS
-        # self.frame_count += 1
-        # if self.frame_count % 1 == 0:
-        #     elapsed = time.time() - self.start_time
-        #     self.fps = self.frame_count / elapsed
-        #     print(f"FPS: {self.fps:.1f}")
+        self.frame_count += 1
+        if self.frame_count % 1 == 0:
+            elapsed = time.time() - self.start_time
+            self.fps = self.frame_count / elapsed
+            # print(f"FPS: {self.fps:.1f}")
             
         return frame
     
@@ -62,8 +62,8 @@ pdi.PAUSE = 0.001
 # 使用示例
 camera = ScreenCaptureDXCam()
 camera.start(target_fps=60)
-pidx = cb.PID_Inc(0.68, 0.0, 0.0, CENTER_WIDTH,2,integral_limit=120,min_output=0.2)
-pidy = cb.PID_Inc(0.68, 0.0, 0.0, CENTER_HEIGHT,2,integral_limit=120,min_output=0.2)
+pidx = cb.PID_Inc(0.689, 0.0, 0.0, CENTER_WIDTH,20,integral_limit=100,min_output=1)
+pidy = cb.PID_Inc(0.689, 0.0, 0.0, CENTER_HEIGHT,20,integral_limit=100,min_output=1)
 accumulatex = 0.0
 accumulatey = 0.0
 
@@ -72,8 +72,8 @@ start_time = time.time()
 while True:
     frame = camera.get_latest_frame()
     if frame is not None:
-        frame = cv2.resize(frame, None, fx=0.2, fy=0.2)
-        blue = lb.color_extraction_dynamic(frame, np.array([78, 43, 46]), np.array([99, 255, 255]))
+        frame = cv2.resize(frame, None, fx=0.2, fy=0.2, interpolation=cv2.INTER_NEAREST)
+        blue = lb.Color_Extraction_Dynamic(frame, np.array([78, 43, 46]), np.array([99, 255, 255]))
         gray = cv2.cvtColor(blue, cv2.COLOR_BGR2GRAY)
         binary = cv2.threshold(gray, 114, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
         contours = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0]
@@ -81,42 +81,45 @@ while True:
         for contour in contours:
             area = abs(cv2.contourArea(contour, True))
             if area > MIN_CONTOUR_AREA:
-                (x, y), radius = cv2.minEnclosingCircle(contour)
-                circle_area = np.pi * radius * radius
-                if True:# area != 0 and abs((area - circle_area)) / area < 0.2:
-                    M = cv2.moments(contour)
-                    if M["m00"] != 0:
-                        cx = int(M["m10"] / M["m00"])
-                        cy = int(M["m01"] / M["m00"])
-                        valid_contour_centers.append([cx, cy])
+                # (x, y), radius = cv2.minEnclosingCircle(contour)
+                # circle_area = np.pi * radius * radius
+                # if True:# area != 0 and abs((area - circle_area)) / area < 0.2:
+                M = cv2.moments(contour)
+                if M["m00"] != 0:
+                    cx = int(M["m10"] / M["m00"])
+                    cy = int(M["m01"] / M["m00"])
+                    valid_contour_centers.append([cx, cy])
         if valid_contour_centers:
             valid_contour_centers = np.asarray(valid_contour_centers)
             valid_index = cb.Get_Closest_Target([CENTER_WIDTH, CENTER_HEIGHT], valid_contour_centers)
             target = valid_contour_centers[valid_index]
-            aim_distance = np.linalg.norm(np.asarray([CENTER_WIDTH, CENTER_HEIGHT]) - target)
+            aim_distance = abs(np.linalg.norm(np.asarray([CENTER_WIDTH, CENTER_HEIGHT]) - target))
             # print(aim_distance)
-            if abs(aim_distance) < 9:
+            if aim_distance < 8.9: 
+                
                 pdi.press('h')
-                valid_contour_centers[valid_index] = 114514
+                time.sleep(0.001)
+                valid_contour_centers[valid_index] = np.asarray([114514, 114514])
                 valid_index = cb.Get_Closest_Target([CENTER_WIDTH, CENTER_HEIGHT], valid_contour_centers)
                 target = valid_contour_centers[valid_index]
-                # should_move = False
             pidx.frequency = camera.fps
             pidy.frequency = camera.fps
+            # start = time.time()
             movex = -int(pidx.Cal_PID(target[0]) * 5)
             movey = -int(pidy.Cal_PID(target[1]) * 5)
+            # print(time.time() - start)
             accumulatex += movex
             accumulatey += movey
             # print(f"x移动{accumulatex}, y移动{accumulatey},帧率:{camera.fps:.1f}FPS")
-            # start = time.time()
-            pdi.moveRel(int(accumulatex), int(accumulatey), 0.003)
-
+            
+            pdi.moveRel(int(accumulatex), int(accumulatey), 0.001)
+            
             #pdi.press('h')
-            # print(time.time() - start)
+            
         else:
             pass
-        binary = cv2.resize(binary, None, fx=0.4, fy=0.4)
-        cv2.imshow("DXCam Capture", binary)
+        # binary = cv2.resize(binary, None, fx=0.1, fy=0.1, interpolation=cv2.INTER_NEAREST)
+        # cv2.imshow("DXCam Capture", binary)
         if cv2.waitKey(1) & 0xFF == 27:
             break
         elif time.time() - start_time > RUN_TIME:
