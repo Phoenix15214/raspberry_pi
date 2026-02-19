@@ -47,6 +47,8 @@ CENTER_SINGLE = 2
 
 
 
+
+
 # 傅里叶变换有关函数
 def FFT_Filtering(img, radius=30, mode=FFT_HIGHPASS):
     """
@@ -225,9 +227,10 @@ def _cal_single_center(contour):
 
 def Get_Center_Point(contour, mode=CENTER_MAX):
     """
-    提取二值化图像中的中心值坐标。
+    提取轮廓中的中心值坐标。
     参数:
         contour:需要计算中心值的轮廓。CENTER_SINGLE模式下为单个轮廓,其他情况下为轮廓列表。
+        mode:计算模式,有CENTER_SINGLE,CENTER_MAX和CENTER_ALL三个选项。
     返回:
         轮廓的中心x值、y值坐标。失败时返回-1, -1。
     """
@@ -259,3 +262,63 @@ def Get_Center_Point(contour, mode=CENTER_MAX):
             return -1, -1
     else:
         raise ValueError("mode参数不存在")
+
+# 特定多边形查找相关函数
+
+def Find_Poly(contours, shape=4, min_area=None, max_area=None, factor=0.1):
+    """
+    对轮廓进行多边形逼近,筛选出特定形状的多边形。
+    参数:
+        contours:需要进行多边形逼近的轮廓列表。
+        shape:需要找出的多边形边数,默认为4。
+        min_area:轮廓最小面积,默认为None(无限制)。
+        max_area:轮廓最大面积,默认为None(无限制)。
+        factor:轮廓逼近时的参数,默认为0.1。
+    返回:
+        有符合条件的轮廓时返回符合条件轮廓的列表,没有符合条件的轮廓时返回空列表。
+    """
+    if shape < 3:
+        raise ValueError("多边形边数不能小于3")
+    if contours is None:
+        return []
+    if not contours:
+        return []
+    
+    valid_contours = []
+
+    for cnt in contours:
+        epsilon = factor * cv2.arcLength(cnt, True)
+        approx = cv2.approxPolyDP(cnt, epsilon, True)
+        contour_num = len(approx)
+        contour_area = cv2.contourArea(cnt)
+        if contour_num == shape:
+            if (min_area is None or contour_area >= min_area) and (max_area is None or contour_area <= max_area):
+                valid_contours.append(cnt)
+    return valid_contours
+
+def Find_Circle(contours, min_area=None, max_area=None, factor=0.2):
+    """
+    筛选轮廓中接近圆形的轮廓。
+    参数:
+        contours:需要进行筛选的轮廓列表。
+        min_area:轮廓最小面积,默认为None(无限制)。
+        max_area:轮廓最大面积,默认为None(无限制)。
+        factor:轮廓面积与外接圆面积的最大差异比例,默认为0.2。
+    返回:
+        有符合条件的轮廓时返回符合条件轮廓的列表,没有符合条件的轮廓时返回空列表。
+    """
+    if contours is None:
+        return []
+    if not contours:
+        return []
+    
+    valid_contours = []
+
+    for cnt in contours:
+        _, radius = cv2.minEnclosingCircle(cnt)
+        circle_area = np.pi * radius * radius
+        contour_area = cv2.contourArea(cnt)
+        if contour_area != 0 and abs(circle_area - contour_area) / contour_area < factor:
+            if (min_area is None or contour_area >= min_area) and (max_area is None or contour_area <= max_area):
+                valid_contours.append(cnt)
+    return valid_contours

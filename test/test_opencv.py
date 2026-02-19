@@ -3,34 +3,37 @@ import numpy as np
 
 
 cap = cv2.VideoCapture(0)
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-
-if not cap.isOpened():
-    print("无法打开摄像头")
-    exit()
-
-cv2.namedWindow("Camera Test")
-cv2.createTrackbar("Threshold", "Camera Test", 120, 255, lambda x: None)
-threshold_value = 120
-kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-try:
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("无法读取摄像头帧")
-            break
-        
-        cv2.imshow('Camera Test', frame)
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        threshold_value = cv2.getTrackbarPos("Threshold", "Camera Test")
-        binary = cv2.threshold(gray, threshold_value, 255, cv2.THRESH_BINARY)[1]
-        cv2.imshow('Oringinal_binary', binary)
-        # kernel = np.ones((5, 5), np.uint8)
-        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=2)
-        cv2.imshow('Binary', binary)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-finally:
-    cap.release()
-    cv2.destroyAllWindows()
+if cap.isOpened():
+    open, read = cap.read()
+else:
+    open = False
+cv2.namedWindow("Contours")
+cv2.createTrackbar("Threshold", "Contours", 160, 255, lambda x:None)
+MIN_AREA = 20000
+while open:
+    ret, frame = cap.read()
+    if not ret:
+        break
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+    threshold = cv2.getTrackbarPos("Threshold", "Contours")
+    binary = cv2.threshold(clahe, threshold, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+    contours = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)[0]
+    draw_img = frame.copy()
+    # draw_img = cv2.drawContours(draw_img, contours, -1, (0, 255, 0), 2)
+    for cnt in contours:
+        epsilon = 0.1 * cv2.arcLength(cnt, False)
+        approx = cv2.approxPolyDP(cnt, epsilon, False)
+        contour_area = cv2.contourArea(cnt)
+        contour_num = len(approx)
+        if contour_area >= MIN_AREA and contour_num == 5:
+            rotating_box = cv2.minAreaRect(approx)
+            box = cv2.boxPoints(rotating_box)
+            box = np.int32(box)
+            draw_img = cv2.drawContours(draw_img, [box], -1, (0, 255, 0), 2)
+    cv2.imshow('Contours', draw_img)
+    cv2.imshow('Binary', binary)
+    if cv2.waitKey(10) & 0xFF == 27:
+        break
+cap.release()
+cv2.destroyAllWindows()
