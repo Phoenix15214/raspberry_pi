@@ -1,4 +1,5 @@
 import numpy as np
+import socket
 # PID相关函数
 
 class PID_Inc():
@@ -96,3 +97,25 @@ def Get_Closest_Target(location, targets):
     closest_index = np.argmin(distances)
 
     return closest_index
+
+
+def Send_Process(tx, rx):
+    
+    isConnected = False
+    connect_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    connect_socket.bind(("", 11451))
+    while True:    
+        connect_socket.listen(3)
+        server_socket, client_addr = connect_socket.accept()
+        isConnected = True
+        tx.send(isConnected)
+        while True:
+            msg = rx.recv()
+            try:
+                server_socket.send(msg.encode("utf8"))
+            except:
+                print("客户端断开连接")
+                isConnected = False
+                tx.send(isConnected)
+                break
+
