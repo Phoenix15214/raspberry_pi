@@ -1,5 +1,6 @@
 import numpy as np
 import socket
+import struct
 # PID相关函数
 
 class PID_Inc():
@@ -98,8 +99,17 @@ def Get_Closest_Target(location, targets):
 
     return closest_index
 
+def _send_by_firewater(data_list, socket):
+    send_msg = ",".join(str(x) for x in data_list) + "\n"
+    socket.send(send_msg.encode("utf8"))
 
-def Send_Process(tx, rx):
+def _send_by_justfloat(data_list, socket):
+    format_string = '<' + 'f' * len(data_list)
+    packed_data = struct.pack(format_string, *data_list)
+    tail = b'\x00\x00\x80\x7f'
+    socket.send(packed_data + tail)
+
+def Send_Process(tx, rx, method="firewater"):
     
     isConnected = False
     connect_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -112,7 +122,17 @@ def Send_Process(tx, rx):
         while True:
             msg = rx.recv()
             try:
-                server_socket.send(msg.encode("utf8"))
+                if method == "firewater":
+                    _send_by_firewater(msg, server_socket)
+                elif method == "justfloat":
+                    _send_by_justfloat(msg, server_socket)
+                else:
+                    raise ValueError("发送方式不正确")
+            except ValueError as err:
+                print(err)
+                method = "justfloat"
+                print("自动更改格式为justfloat")
+                continue
             except:
                 print("客户端断开连接")
                 isConnected = False
