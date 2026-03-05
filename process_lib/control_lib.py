@@ -126,9 +126,9 @@ def _send_by_justfloat(data_list, socket):
     tail = b'\x00\x00\x80\x7f'
     socket.send(packed_data + tail)
 
-def _send_thread(tx, rx, method, socket):
+def _send_thread(conn, method, socket):
     while True:
-            msg = rx.recv()
+            msg = conn.recv()
             try:
                 if method == "firewater":
                     _send_by_firewater(msg, socket)
@@ -137,20 +137,20 @@ def _send_thread(tx, rx, method, socket):
             except:
                 print("客户端断开连接")
                 isConnected = False
-                tx.send(isConnected)
+                conn.send(isConnected)
                 break
 
-def _recv_thread(tx, rx, method, socket):
+def _recv_thread(conn, socket):
     while True:
         try:
             msg = socket.recv(1024).decode("utf8")
             if len(msg) == 0:
                 break
-            tx.send(msg)
+            conn.send(msg)
         except:
             break
 
-def Send_Process(tx, rx, method="justfloat"):
+def Send_Process(conn, method="justfloat"):
     if method not in ("justfloat", "firewater"):
         print("发送方式不正确")
         method = "justfloat"
@@ -163,9 +163,9 @@ def Send_Process(tx, rx, method="justfloat"):
         server_socket, client_addr = connect_socket.accept()
         isConnected = True
         print("客户端已连接")
-        tx.send(isConnected)
-        t1 = Thread(target=_send_thread, args=(tx, rx, method, server_socket))
-        t2 = Thread(target=_recv_thread, args=(tx, rx, method, server_socket))
+        conn.send(isConnected)
+        t1 = Thread(target=_send_thread, args=(conn, method, server_socket))
+        t2 = Thread(target=_recv_thread, args=(conn, server_socket))
         t1.start()
         t2.start()
 
