@@ -1,6 +1,7 @@
 import numpy as np
 import socket
 import struct
+from threading import Thread
 # PID相关函数
 
 class PID_Inc():
@@ -109,8 +110,35 @@ def _send_by_justfloat(data_list, socket):
     tail = b'\x00\x00\x80\x7f'
     socket.send(packed_data + tail)
 
-def Send_Process(tx, rx, method="firewater"):
-    
+def _send_thread(tx, rx, method, socket):
+    while True:
+            msg = rx.recv()
+            try:
+                if method == "firewater":
+                    _send_by_firewater(msg, socket)
+                elif method == "justfloat":
+                    _send_by_justfloat(msg, socket)
+            except:
+                print("客户端断开连接")
+                isConnected = False
+                tx.send(isConnected)
+                break
+
+def _recv_thread(tx, rx, method, socket):
+    while True:
+        try:
+            msg = socket.recv(1024).decode("utf8")
+            if len(msg) == 0:
+                break
+            tx.send(msg)
+        except:
+            break
+
+def Send_Process(tx, rx, method="justfloat"):
+    if method not in ("justfloat", "firewater"):
+        print("发送方式不正确")
+        method = "justfloat"
+        print("自动更改格式为justfloat")
     isConnected = False
     connect_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     connect_socket.bind(("", 11451))
@@ -118,24 +146,10 @@ def Send_Process(tx, rx, method="firewater"):
         connect_socket.listen(3)
         server_socket, client_addr = connect_socket.accept()
         isConnected = True
+        print("客户端已连接")
         tx.send(isConnected)
-        while True:
-            msg = rx.recv()
-            try:
-                if method == "firewater":
-                    _send_by_firewater(msg, server_socket)
-                elif method == "justfloat":
-                    _send_by_justfloat(msg, server_socket)
-                else:
-                    raise ValueError("发送方式不正确")
-            except ValueError as err:
-                print(err)
-                method = "justfloat"
-                print("自动更改格式为justfloat")
-                continue
-            except:
-                print("客户端断开连接")
-                isConnected = False
-                tx.send(isConnected)
-                break
+        t1 = Thread(target=_send_thread, args=(tx, rx, method, server_socket))
+        t2 = Thread(target=_recv_thread, args=(tx, rx, method, server_socket))
+        t1.start()
+        t2.start()
 
