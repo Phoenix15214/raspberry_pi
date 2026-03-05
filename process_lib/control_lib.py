@@ -100,6 +100,22 @@ def Get_Closest_Target(location, targets):
 
     return closest_index
 
+# VOFA+调试相关函数
+def Parse_Input(msg):
+    start_flag = ":"
+    end_flag = "\n"
+    start_pos = msg.find(start_flag)
+    content_pos = start_pos + len(start_flag)
+    end_pos = msg.find(end_flag)
+    if start_pos == -1 or end_pos == -1:
+        return None, None
+    if end_pos <= start_pos:
+        return None, None
+    command = msg[0:start_pos]
+    value = msg[content_pos:end_pos]
+    return command, value
+
+
 def _send_by_firewater(data_list, socket):
     send_msg = ",".join(str(x) for x in data_list) + "\n"
     socket.send(send_msg.encode("utf8"))
