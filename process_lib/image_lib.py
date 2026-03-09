@@ -141,7 +141,7 @@ def Template_Matching(img, templates, threshold=0.5, min_scale=0.7,num_scale=5, 
 
 def Create_Arr(*args):
     """
-    创建任意类型的数组。
+    创建任意类型的数组(用于模板匹配中模板列表的创建)。
     参数:
         *args:任意数量的同类型元素。
     返回:

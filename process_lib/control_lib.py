@@ -1,5 +1,6 @@
 import numpy as np
 import socket
+import serial
 import struct
 from threading import Thread
 # PID相关函数
@@ -102,6 +103,14 @@ def Get_Closest_Target(location, targets):
 
 # VOFA+调试相关函数
 def Parse_Input(msg):
+    """
+    解析VOFA+发送的设置数据
+    参数:
+        msg:解码后的消息。
+    返回:
+        command:要设置的变量。
+        value:要设置的值。
+    """
     start_flag = ":"
     end_flag = "\n"
     start_pos = msg.find(start_flag)
@@ -151,6 +160,14 @@ def _recv_thread(conn, socket):
             break
 
 def Send_Process(conn, method="justfloat"):
+    """
+    在进程内使用,用于向VOFA+发送调试信息。
+    参数:
+        conn:与其他进程或主程序通信的pipe。
+        method:发送数据的格式,有"firewater"和"justfloat"两种选择。
+    返回:
+        无,需要在进程中运行。
+    """
     if method not in ("justfloat", "firewater"):
         print("发送方式不正确")
         method = "justfloat"
@@ -168,4 +185,108 @@ def Send_Process(conn, method="justfloat"):
         t2 = Thread(target=_recv_thread, args=(conn, server_socket))
         t1.start()
         t2.start()
+
+# 串口通信相关内容
+
+class SerialPacket:
+    def __init__(self, port="COM6", baudrate=115200, timeout=0.1):
+        self.header = bytearray([0xFF, 0xAA])
+        self.tail = bytearray([0x55, 0xFE])
+        self.recv_data = []  # 收到数据默认已经在内部按UTF8格式解码
+        self.send_data = bytearray()
+        self.buffer = bytearray()
+        self.isOpened = False
+        self.index = 0  # 数据插入位置
+        self.ser = None
+        try:
+            self.ser = serial.Serial(port, baudrate, timeout=timeout)
+            if self.ser.is_open:
+                print(f"串口 {port} 已成功打开！")
+                self.isOpened = True
+            else:
+                print(f"串口 {port} 打开失败！")
+                self.isOpened = False
+        except serial.SerialException as e:
+            print(f"串口 {port} 打开失败，错误信息：{e}")
+            self.isOpened = False
+        except Exception as e:
+            print(f"发生未知错误：{e}")
+            self.isOpened = False
+
+    def __clear_packet(self):
+        self.send_data = bytearray()
+        self.index = 0  # 数据插入位置清零
+
+    def insert_byte(self, value):
+        self.send_data.insert(self.index, value)  # 插入到数据部分开头（包头之后）
+        self.index += 1
+
+    def insert_two_bytes(self, values):
+        self.send_data.insert(self.index, values[0])  # 插入到数据部分开头（包头之后）
+        self.index += 1
+        self.send_data.insert(self.index, values[1])  # 插入到数据部分开头（包头之后）
+        self.index += 1
+
+    def insert_bytes(self, index, values):
+        for i, val in enumerate(values):
+            self.send_data.insert(index + i, val)
+            self.index += 1
+
+    def num_to_bytes(self, value):
+        if not 0 <= value <= 0xFFFF:
+            raise ValueError("输入值必须在 0~65535 之间")
+
+        high_byte = (value >> 8) & 0xFF  # 高8位
+        low_byte = value & 0xFF  # 低8位
+
+        return [high_byte, low_byte]
+
+    def __build_packet(self):
+        return self.header + self.send_data + self.tail
+
+    def send_packet(self):
+        if self.isOpened:
+            packet = self.__build_packet()
+            self.ser.write(packet)
+            self.__clear_packet()
+    
+    def __parse_buffer(self):
+        while True:
+            start = self.buffer.find(self.header)
+            if start == -1:
+                break
+            end = self.buffer.find(self.tail, start + len(self.header))
+            if end == -1:
+                break
+            try:
+                self.recv_data.append(self.buffer[start + len(self.header): end].decode("utf8"))
+            except UnicodeDecodeError:
+                print("解码格式不正确")
+                raise UnicodeDecodeError("解码格式不正确")
+            self.buffer = self.buffer[end + len(self.tail):]
+        
+    def recv_packet(self):
+        if self.isOpened and self.ser.in_waiting > 0:
+            packet = self.ser.read(self.ser.in_waiting)
+            self.buffer += packet
+            self.__parse_buffer()
+
+    def get_recv_data(self, clear=True):
+        recv_data = self.recv_data
+        if clear:
+            self.recv_data = []
+        return recv_data
+    
+    def close(self):
+        if self.ser and self.ser.is_open:
+            self.ser.close()
+            self.isOpened = False
+
+    def __enter__(self):
+        return self
+    
+    def __exit__(self,exc_type, exc_val, exc_tb):
+        self.close()
+        
+    
 
