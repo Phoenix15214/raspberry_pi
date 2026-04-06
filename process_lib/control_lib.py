@@ -2,6 +2,7 @@ import numpy as np
 import socket
 import serial
 import struct
+import time
 from threading import Thread
 # PID相关函数
 
@@ -288,5 +289,77 @@ class SerialPacket:
     def __exit__(self,exc_type, exc_val, exc_tb):
         self.close()
         
-    
+class Timer:
+    def __init__(self):
+        self.last_time = time.time()
 
+    def update(self):
+        current = time.time()
+        interval = current - self.last_time
+        return interval
+    
+    def reset(self):
+        self.last_time = time.time()
+
+# 没写完，对多次按下的逻辑处理不完整，对getstate函数的逻辑处理不完整
+class Button:
+    def __init__(self, max_interval=3, max_click=3):
+        self.max_interval = max_interval
+        self.last_time = time.time()
+        self.clicking = False
+        self.max_click = max_click
+        self.click_count = 0
+        self.state = "release"
+        self.last_action = "standby"
+    
+    def pushed(self):
+        current = time.time()
+        interval = self.last_time - current
+        if interval > self.max_interval:
+            self.click_count = 0
+        self.last_time = current
+        self.state = "push"
+
+    def release(self):
+        current = time.time()
+        interval = current - self.last_time
+        if interval > self.max_interval:
+            self.last_action = "long_push"
+        else:
+            self.clicking = True
+            self.click_count += 1
+            self.last_action = f"{self.click_count}"
+        self.last_time = current
+        self.state = "release"
+        return interval
+
+    def get_state(self):
+        current = time.time()
+        if self.clicking:
+            if (current - self.last_time) < self.max_interval:
+                return "clicking"
+            else:
+                self.clicking = False
+                return f"{self.click_count}"
+        else:
+            if self.last_action == "long_push":            
+                result = "long_push"
+                self.last_action = "standby"
+                return result
+            elif self.last_action == "standby":
+                return "standby"
+
+
+# 顶点重排序函数
+def Reorder_Vertex(vertices):
+    sums = []
+    sorted_vertices = []
+    for vertex in vertices:
+        sums.append(vertex[0] + vertex[1])
+    max_index = sums.index(max(sums))
+    sorted_vertices.append(vertices[(max_index + 2) % 4])  # 左上
+    sorted_vertices.append(vertices[(max_index + 3) % 4])  # 右上
+    sorted_vertices.append(vertices[max_index])  # 右下
+    sorted_vertices.append(vertices[(max_index + 1) % 4])  # 左下
+    sorted_vertices = np.array(sorted_vertices)
+    return sorted_vertices

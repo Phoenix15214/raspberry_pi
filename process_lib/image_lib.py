@@ -97,60 +97,115 @@ def FFT_Filtering(img, radius=30, mode=FFT_HIGHPASS):
     return img_back
 
 # 模板匹配有关函数
-def Template_Matching(img, templates, threshold=0.5, min_scale=0.7,num_scale=5, method=cv2.TM_CCOEFF_NORMED):
+def Nms(boxes, scores, iou_threshold=0.5):
+    """
+    进行非极大值抑制(NMS)以去除重叠的边界框。
+    参数:
+        boxes:边界框列表,每个边界框由四个坐标值(x1, y1, x2, y2)组成。
+        scores:每个边界框对应的匹配度分数列表。
+        iou_threshold:交并比阈值,默认为0.5。交并比大于该阈值的边界框将被抑制。
+    返回:
+        保留的边界框索引列表。
+    """
+    if len(boxes) == 0:
+        return []
+    boxes = np.array(boxes)
+    # 将匹配度降序排序,获取排序后的索引
+    order = np.argsort(scores)[::-1]
+    keep = []
+    while order.size > 0:
+        i = order[0]
+        keep.append(i)
+        # 计算当前最高匹配度的框与其他框的交并比
+        xx1 = np.maximum(boxes[i][0], boxes[order[1:], 0])
+        yy1 = np.maximum(boxes[i][1], boxes[order[1:], 1])
+        xx2 = np.minimum(boxes[i][2], boxes[order[1:], 2])
+        yy2 = np.minimum(boxes[i][3], boxes[order[1:], 3])
+        w = np.maximum(0.0, xx2 - xx1)
+        h = np.maximum(0.0, yy2 - yy1)
+        inter = w * h
+        iou = inter / ( (boxes[i][2] - boxes[i][0]) * (boxes[i][3] - boxes[i][1]) + (boxes[order[1:], 2] - boxes[order[1:], 0]) * (boxes[order[1:], 3] - boxes[order[1:], 1]) - inter + 1e-6)
+        # 保留交并比小于阈值的框
+        index = np.where(iou <= iou_threshold)[0]
+        order = order[index + 1]
+    return keep
+
+def Template_Matching(img, templates, threshold=0.5, min_scale=0.5,num_scale=5):
     """
     在输入图像中查找与模板图像匹配的区域。
     参数:
         img: 输入图像，灰度图与彩色图均可。
         template: 模板图像，必须为灰度图。
         threshold:模板匹配阈值,默认为0.5。
-        min_scale:在多尺度匹配中最小尺度,默认为0.7。
+        min_scale:在多尺度匹配中最小尺度,默认为0.5。
         num_scale:多尺度匹配中的尺度数量,默认为5。
-        method: 模板匹配方法,默认为cv2.TM_CCOEFF_NORMED。
     返回:
-        最佳匹配结果在模板中的索引。
+        valid_index:高于阈值的模板的索引。
+        valid_location:模板在图中对应的坐标位置。
     """
-    
     best_template = []
-    best_index = 0
+    best_box = []
+    valid_index = []
+
     if img is None:
         raise ValueError("输入图像不能为空")
     if img.ndim not in [2, 3]:
         raise ValueError("输入图像必须为灰度图或彩色图")
     
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img
-    img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX)
+    img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
-    for template in templates:
-        template = cv2.normalize(template, None, 0, 255, cv2.NORM_MINMAX)
-
+    # 在min_scale和1.0之间生成一个包含 num_scale 个等间距数值的数组
     scales = np.linspace(min_scale, 1.0, num_scale)
 
     for template in templates:
-        best_match = -1
+        resize_template = template
+        good_match = [] # 符合条件模板的匹配度
+        good_box = [] # 符合条件的模板的边界框
+        # 不同尺度进行匹配
         for scale in scales:
-            template = cv2.resize(template, None, fx=scale, fy=scale, interpolation=cv2.INTER_LINEAR)
-            res = cv2.matchTemplate(img, template, cv2.TM_CCOEFF_NORMED)
-            _, val, _, _ = cv2.minMaxLoc(res)
-            best_match = max(val, best_match)
-        best_template.append(best_match)
+            resize_template = cv2.resize(template, None, fx=scale, fy=scale, interpolation=cv2.INTER_LINEAR)
+            h, w = resize_template.shape
+            # 进行模板匹配,返回模板匹配的相似度结果
+            res = cv2.matchTemplate(img, resize_template, cv2.TM_CCOEFF_NORMED)
+            locs = np.where(res >= threshold)
+            for pt in zip(*locs[::-1]):
+                x, y = pt[0], pt[1]
+                good_box.append(np.asarray([x, y, x + w, y + h]))
+                good_match.append(res[y, x])
+        # 如果没有匹配到,就返回空列表，跳过NMS
+        if not good_box:
+            best_template.append([])
+            best_box.append([])
+            continue
+        # 进行NMS
+        keep = Nms(good_box, good_match, iou_threshold=0.5)
+        keep_box = [good_box[i] for i in keep]
+        keep_match = [good_match[i] for i in keep]
+        # 将该模板的最高匹配度储存在数组中
+        best_template.append(keep_match)
+        best_box.append(keep_box)
 
-    best_index = np.argmax(best_template)
+    # 返回最高匹配度大于阈值的模板的index
+    valid_index = [i for i, scores_list in enumerate(best_template) if scores_list]
+    valid_box = [best_box[i] for i in valid_index]
 
-    return best_index if best_template[best_index] > threshold else -1
+    return valid_index, valid_box
 
 def Create_Arr(*args):
     """
-    创建任意类型的数组(用于模板匹配中模板列表的创建)。
+    创建用于模板匹配的数组。
     参数:
         *args:任意数量的同类型元素。
     返回:
         合成后的数组。
     """
-    if args is None:
+    if not args:
         raise ValueError("输入不能为空")
     elements = []
     for element in args:
+        element = cv2.cvtColor(element, cv2.COLOR_BGR2GRAY) if element.ndim == 3 else element
+        element = cv2.normalize(element, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
         elements.append(element)
 
     return elements
@@ -275,7 +330,7 @@ def Find_Poly(contours, shape=4, min_area=None, max_area=None, factor=0.1):
         max_area:轮廓最大面积,默认为None(无限制)。
         factor:轮廓逼近时的参数,默认为0.1。
     返回:
-        有符合条件的轮廓时返回符合条件轮廓的列表,没有符合条件的轮廓时返回空列表。
+        有符合条件的轮廓时返回符合条件轮廓顶点坐标的列表,没有符合条件的轮廓时返回空列表。
     """
     if shape < 3:
         raise ValueError("多边形边数不能小于3")
@@ -284,7 +339,7 @@ def Find_Poly(contours, shape=4, min_area=None, max_area=None, factor=0.1):
     if not contours:
         return []
     
-    valid_contours = []
+    valid_contour_vertex = []
 
     for cnt in contours:
         epsilon = factor * cv2.arcLength(cnt, True)
@@ -293,8 +348,8 @@ def Find_Poly(contours, shape=4, min_area=None, max_area=None, factor=0.1):
         contour_area = cv2.contourArea(cnt)
         if contour_num == shape:
             if (min_area is None or contour_area >= min_area) and (max_area is None or contour_area <= max_area):
-                valid_contours.append(cnt)
-    return valid_contours
+                valid_contour_vertex.append(approx)
+    return valid_contour_vertex
 
 def Find_Circle(contours, min_area=None, max_area=None, factor=0.2):
     """
@@ -305,20 +360,40 @@ def Find_Circle(contours, min_area=None, max_area=None, factor=0.2):
         max_area:轮廓最大面积,默认为None(无限制)。
         factor:轮廓面积与外接圆面积的最大差异比例,默认为0.2。
     返回:
-        有符合条件的轮廓时返回符合条件轮廓的列表,没有符合条件的轮廓时返回空列表。
+        有符合条件的轮廓时返回符合条件轮廓外接圆圆心坐标以及半径的列表,没有符合条件的轮廓时返回空列表。
     """
-    if contours is None:
-        return []
-    if not contours:
-        return []
+    if contours is None or not contours:
+        return [], []
     
-    valid_contours = []
+    valid_centers = []
+    valid_radius = []
 
     for cnt in contours:
-        _, radius = cv2.minEnclosingCircle(cnt)
+        (x, y), radius = cv2.minEnclosingCircle(cnt)
         circle_area = np.pi * radius * radius
         contour_area = cv2.contourArea(cnt)
         if contour_area != 0 and abs(circle_area - contour_area) / contour_area < factor:
             if (min_area is None or contour_area >= min_area) and (max_area is None or contour_area <= max_area):
-                valid_contours.append(cnt)
-    return valid_contours
+                valid_centers.append((x, y))
+                valid_radius.append(radius)
+    return valid_centers, valid_radius
+
+# 图像映射函数
+def Perspective_Transform(img, box):
+    width = int(max(
+    np.linalg.norm(box[1] - box[0]),  # 上边宽度
+    np.linalg.norm(box[2] - box[3])   # 下边宽度
+                ))
+    height = int(max(
+    np.linalg.norm(box[3] - box[0]),  # 左边高度
+    np.linalg.norm(box[2] - box[1])   # 右边高度
+                ))
+    pts_dst = np.float32([
+        [0, 0],        # 左上
+        [width - 1, 0],        # 右上
+        [width - 1, height - 1], # 右下
+        [0, height - 1]         # 左下
+                ])
+    M = cv2.getPerspectiveTransform(np.float32(box), pts_dst)
+    warped = cv2.warpPerspective(img, M, (width, height))
+    return warped
