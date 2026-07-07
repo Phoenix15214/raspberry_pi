@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import time
 
 # 傅里叶变换有关参数
 FFT_HIGHPASS = 0
@@ -189,8 +190,9 @@ def Template_Matching(img, templates, threshold=0.5, min_scale=0.5,num_scale=5):
     # 返回最高匹配度大于阈值的模板的index
     valid_index = [i for i, scores_list in enumerate(best_template) if scores_list]
     valid_box = [best_box[i] for i in valid_index]
+    valid_match = [scores_list for i, scores_list in enumerate(best_template) if scores_list]
 
-    return valid_index, valid_box
+    return valid_index, valid_box, valid_match
 
 def Create_Arr(*args):
     """
