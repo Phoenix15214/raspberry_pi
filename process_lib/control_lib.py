@@ -188,7 +188,6 @@ def Send_Process(conn, method="justfloat"):
         t2.start()
 
 # 串口通信相关内容
-
 class SerialPacket:
     def __init__(self, port="COM6", baudrate=115200, timeout=0.1):
         self.header = bytearray([0xFF, 0xAA])
@@ -228,6 +227,12 @@ class SerialPacket:
         self.send_data.insert(self.index, values[1])  # 插入到数据部分开头（包头之后）
         self.index += 1
 
+    def insert_three_bytes(self, values): # 三字节实际只有一条消息，有一字节为校验位
+        check_byte = values[0] ^ values[1]
+        bytes_to_insert = [values[0], values[1], check_byte]
+        self.send_data[self.index:self.index] = bytes_to_insert # 使用切片赋值在指定位置一次性插入多个元素
+        self.index += 3
+        
     def insert_bytes(self, index, values):
         for i, val in enumerate(values):
             self.send_data.insert(index + i, val)
@@ -247,9 +252,16 @@ class SerialPacket:
 
     def send_packet(self):
         if self.isOpened:
-            packet = self.__build_packet()
-            self.ser.write(packet)
-            self.__clear_packet()
+            try:
+                packet = self.__build_packet()
+                self.ser.write(packet)
+                self.__clear_packet()
+            except serial.SerialException as e:
+                print(f"串口发送数据失败，错误信息：{e}")
+                self.isOpened = False
+            except Exception as e:
+                print(f"发生未知错误：{e}")
+                self.isOpened = False
     
     def __parse_buffer(self):
         while True:
@@ -304,13 +316,13 @@ class Timer:
 # 没写完，对多次按下的逻辑处理不完整，对getstate函数的逻辑处理不完整
 class Button:
     def __init__(self, max_interval=3, max_click=3):
-        self.max_interval = max_interval
-        self.last_time = time.time()
+        self.max_interval = max_interval # 判断多次按下时的最大间隔时间
+        self.last_time = time.time() # 上一次按下的时间
         self.clicking = False
         self.max_click = max_click
-        self.click_count = 0
-        self.state = "release"
-        self.last_action = "standby"
+        self.click_count = 0 # 多次按下的次数
+        self.state = "release" # 当前按键的状态
+        self.last_action = "standby" # 上一次按键的动作
     
     def pushed(self):
         current = time.time()
@@ -361,5 +373,27 @@ def Reorder_Vertex(vertices):
     sorted_vertices.append(vertices[(max_index + 3) % 4])  # 右上
     sorted_vertices.append(vertices[max_index])  # 右下
     sorted_vertices.append(vertices[(max_index + 1) % 4])  # 左下
+    sorted_vertices = np.array(sorted_vertices)
+    return sorted_vertices
+
+def Reorder_Vertex_Pole(vertices):
+    sums = []
+    sum_x = []
+    sum_y = []
+    arctan = []
+    sorted_vertices = []
+    for vertex in vertices:
+        sum_x.append(vertex[0])
+        sum_y.append(vertex[1])
+        sums.append(vertex[0] + vertex[1])
+    max_index = sums.index(max(sums)) # 作为右下角
+    center_x = np.mean(vertices[:, 0])
+    center_y = np.mean(vertices[:, 1])
+    for vertex in vertices:
+        arctan.append(np.arctan2(vertex[1] - center_y, vertex[0] - center_x))
+    # 根据 arctan 值对顶点进行排序
+    sorted_indices = np.argsort(arctan)
+    for index in sorted_indices:
+        sorted_vertices.append(vertices[index])
     sorted_vertices = np.array(sorted_vertices)
     return sorted_vertices
