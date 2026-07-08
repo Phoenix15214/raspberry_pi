@@ -3,16 +3,12 @@ import time
 
 def Parse_Input(msg):
     start_flag = ":"
-    end_flag = "\n"
     start_pos = msg.find(start_flag)
     content_pos = start_pos + len(start_flag)
-    end_pos = msg.find(end_flag)
-    if start_pos == -1 or end_pos == -1:
-        return None, None
-    if end_pos <= start_pos:
+    if start_pos == -1:
         return None, None
     command = msg[0:start_pos]
-    value = msg[content_pos:end_pos]
+    value = msg[content_pos:]
     return command, value
 
 def main():
@@ -28,6 +24,7 @@ def main():
         pack.recv_packet()
         recv_data = pack.get_recv_data()
         if recv_data:
+            recv_data = recv_data[0].decode("utf-8")
             print(f"Received data: {recv_data}")
             command, value = Parse_Input(recv_data)
             if command is not None and value is not None:

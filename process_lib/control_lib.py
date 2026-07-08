@@ -192,7 +192,9 @@ class SerialPacket:
     def __init__(self, port="COM6", baudrate=115200, timeout=0.1):
         self.header = bytearray([0xFF, 0xAA])
         self.tail = bytearray([0x55, 0xFE])
-        self.recv_data = []  # 收到数据默认已经在内部按UTF8格式解码
+        self.recv_header = "@"
+        self.recv_tail = "$#"
+        self.recv_data = []  # 收到数据未经编码，默认已是UTF-8
         self.send_data = bytearray()
         self.buffer = bytearray()
         self.isOpened = False
@@ -265,18 +267,14 @@ class SerialPacket:
     
     def __parse_buffer(self):
         while True:
-            start = self.buffer.find(self.header)
+            start = self.buffer.decode("utf-8").find(self.recv_header)
             if start == -1:
                 break
-            end = self.buffer.find(self.tail, start + len(self.header))
+            end = self.buffer.decode("utf-8").find(self.recv_tail, start + len(self.recv_header))
             if end == -1:
                 break
-            try:
-                self.recv_data.append(self.buffer[start + len(self.header): end].decode("utf8"))
-            except UnicodeDecodeError:
-                print("解码格式不正确")
-                raise UnicodeDecodeError("解码格式不正确")
-            self.buffer = self.buffer[end + len(self.tail):]
+            self.recv_data.append(self.buffer[start + len(self.recv_header): end])
+            self.buffer = self.buffer[end + len(self.recv_tail):]
         
     def recv_packet(self):
         if self.isOpened and self.ser.in_waiting > 0:
