@@ -284,10 +284,24 @@ class SerialPacket:
 
     def get_recv_data(self, clear=True):
         recv_data = self.recv_data
+        if recv_data:
+            recv_data = recv_data[0].decode("utf-8")
+        else:
+            recv_data = None
         if clear:
             self.recv_data = []
         return recv_data
     
+    def parse_input(self, msg):
+        start_flag = ":"
+        start_pos = msg.find(start_flag)
+        content_pos = start_pos + len(start_flag)
+        if start_pos == -1:
+            return None, None
+        command = msg[0:start_pos]
+        value = msg[content_pos:]
+        return command, value
+
     def close(self):
         if self.ser and self.ser.is_open:
             self.ser.close()
@@ -311,11 +325,13 @@ class Timer:
     def reset(self):
         self.last_time = time.time()
 
-# 没写完，对多次按下的逻辑处理不完整，对getstate函数的逻辑处理不完整
+# 按键相关函数
 class Button:
-    def __init__(self, max_interval=3, max_click=3):
+    def __init__(self, max_interval=3, long_push_interval=1, max_click=3):
         self.max_interval = max_interval # 判断多次按下时的最大间隔时间
+        self.long_push_interval = long_push_interval # 判断长按的间隔时间
         self.last_time = time.time() # 上一次按下的时间
+        self.min_interval = 0.01 # 最小间隔时间，防止抖动
         self.clicking = False
         self.max_click = max_click
         self.click_count = 0 # 多次按下的次数
@@ -324,7 +340,10 @@ class Button:
     
     def pushed(self):
         current = time.time()
-        interval = self.last_time - current
+        interval = current - self.last_time
+        if interval < self.min_interval:
+            self.last_time = current
+            return
         if interval > self.max_interval:
             self.click_count = 0
         self.last_time = current
@@ -333,32 +352,44 @@ class Button:
     def release(self):
         current = time.time()
         interval = current - self.last_time
-        if interval > self.max_interval:
+        if interval < self.min_interval:
+            self.state = "release"
+            self.last_time = current
+            return
+        if interval > self.long_push_interval:
             self.last_action = "long_push"
         else:
             self.clicking = True
-            self.click_count += 1
-            self.last_action = f"{self.click_count}"
+            self.click_count += 1 if self.click_count < self.max_click else 0
+            self.last_action = "clicked"
         self.last_time = current
         self.state = "release"
         return interval
 
     def get_state(self):
         current = time.time()
+        # 检查是否处于正在点击状态
         if self.clicking:
             if (current - self.last_time) < self.max_interval:
                 return "clicking"
             else:
                 self.clicking = False
-                return f"{self.click_count}"
+                return "clicked"
         else:
-            if self.last_action == "long_push":            
+            if self.last_action == "long_push":
+                # 如果上一个动作是长按，则返回长按状态，并重置上一个动作
                 result = "long_push"
                 self.last_action = "standby"
                 return result
             elif self.last_action == "standby":
                 return "standby"
-
+            elif self.last_action == "clicked":
+                result = "clicked"
+                self.last_action = "standby"
+                return result
+            else:
+                print("未知状态,需要完善程序")
+                return "standby"
 
 # 顶点重排序函数
 def Reorder_Vertex(vertices):
@@ -374,6 +405,7 @@ def Reorder_Vertex(vertices):
     sorted_vertices = np.array(sorted_vertices)
     return sorted_vertices
 
+# 通过极坐标进行顶点重排序
 def Reorder_Vertex_Pole(vertices):
     sums = []
     sum_x = []
