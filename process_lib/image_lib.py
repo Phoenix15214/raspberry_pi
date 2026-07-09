@@ -399,3 +399,112 @@ def Perspective_Transform(img, box):
     M = cv2.getPerspectiveTransform(np.float32(box), pts_dst)
     warped = cv2.warpPerspective(img, M, (width, height))
     return warped
+
+class YOLODetector:
+    def __init__(self, model_path, num_classes, method="onnx", conf_thresh=0.5, iou_thresh=0.45, imgsz=(224,224), cores=None):
+        self.method = method
+        self.model_path = model_path
+        self.conf_thresh = conf_thresh
+        self.iou_thresh = iou_thresh
+        self.imgsz = imgsz
+        self.num_classes = num_classes
+
+        if method == "onnx":
+            import onnxruntime as ort
+            opts = ort.SessionOptions()
+            opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+            if cores is not None:
+                opts.intra_op_num_threads = cores
+            try:
+                self.session = ort.InferenceSession(model_path, sess_options=opts, providers=['CPUExecutionProvider'])
+            except ONNXRuntimeError as e:
+                print(f"Error loading ONNX model: {e}")
+                raise RuntimeError("Failed to load ONNX model.")
+            except Exception as e:
+                print(f"Unexpected error loading ONNX model: {e}")
+                raise RuntimeError("Failed to load ONNX model due to an unexpected error.")
+            inp = self.session.get_inputs()[0]
+            self.input_name = inp.name
+            self.output_name = self.session.get_outputs()[0].name
+            dummy = np.zeros((1, 3, 224, 224), dtype=np.float32)
+            self.session.run([self.output_name], {self.input_name: dummy})
+        else:
+            raise ValueError("Unsupported method: {}".format(method))
+
+    @staticmethod
+    def letterbox(img, target_size):
+        """保持长宽比缩放，并填充灰边(114)"""
+        h, w = img.shape[:2]
+        tw, th = target_size
+        scale = min(tw / w, th / h)
+        nw, nh = int(w * scale), int(h * scale)
+        img_resized = cv2.resize(img, (nw, nh))
+        canvas = np.full((th, tw, 3), 114, dtype=np.uint8)
+        top = (th - nh) // 2
+        left = (tw - nw) // 2
+        canvas[top:top+nh, left:left+nw] = img_resized
+        return canvas, scale, (left, top)
+    
+    @staticmethod
+    def nms(boxes, scores, iou_thresh):
+        """NMS算法"""
+        x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+        areas = (x2 - x1) * (y2 - y1)
+        order = scores.argsort()[::-1]
+        keep = []
+        while order.size > 0:
+            i = order[0]
+            keep.append(i)
+            xx1 = np.maximum(x1[i], x1[order[1:]])
+            yy1 = np.maximum(y1[i], y1[order[1:]])
+            xx2 = np.minimum(x2[i], x2[order[1:]])
+            yy2 = np.minimum(y2[i], y2[order[1:]])
+            inter = np.maximum(0, xx2-xx1) * np.maximum(0, yy2-yy1)
+            iou = inter / (areas[i] + areas[order[1:]] - inter + 1e-6)
+            order = order[np.where(iou <= iou_thresh)[0] + 1]
+        return keep
+    
+    @staticmethod
+    def postprocess(output, conf_thresh, iou_thresh, num_classes, scale, pad):
+        pred = output.squeeze(0).T  # [1, 12, 8400] -> [8400, 12]
+        
+        boxes = pred[:, :4]          # xywh (已经是 0-224 的绝对坐标)
+        class_scores = pred[:, 4:4+num_classes]
+        scores = np.max(class_scores, axis=1)
+        class_ids = np.argmax(class_scores, axis=1)
+
+        mask = scores > conf_thresh
+        boxes, scores, class_ids = boxes[mask], scores[mask], class_ids[mask]
+        if len(boxes) == 0:
+            return np.array([]), np.array([]), np.array([])
+
+        x1 = boxes[:, 0] - boxes[:, 2] / 2
+        y1 = boxes[:, 1] - boxes[:, 3] / 2
+        x2 = boxes[:, 0] + boxes[:, 2] / 2
+        y2 = boxes[:, 1] + boxes[:, 3] / 2
+        boxes_xyxy = np.stack([x1, y1, x2, y2], axis=1)
+
+        keep = YOLODetector.nms(boxes_xyxy, scores, iou_thresh)
+        boxes_xyxy, scores, class_ids = boxes_xyxy[keep], scores[keep], class_ids[keep]
+
+        # 映射回原图坐标 (减去 pad，除以 scale)
+        pad_left, pad_top = pad
+        boxes_xyxy[:, [0, 2]] = (boxes_xyxy[:, [0, 2]] - pad_left) / scale
+        boxes_xyxy[:, [1, 3]] = (boxes_xyxy[:, [1, 3]] - pad_top) / scale
+
+        return boxes_xyxy.astype(int), scores, class_ids
+    
+    def detect(self, img):
+        img_lb, scale, pad = YOLODetector.letterbox(img, self.imgsz)
+        img_data = img_lb.astype(np.float32) / 255.0
+        img_data = img_data.transpose(2, 0, 1)[np.newaxis, :]  # [1, 3, H, W]
+        output = self.session.run([self.output_name], {self.input_name: img_data})[0]
+        boxes, scores, class_ids = YOLODetector.postprocess(output, self.conf_thresh, self.iou_thresh, self.num_classes, scale, pad)
+        return boxes, scores, class_ids
+
+    def draw_boxes(self, img, boxes, scores, class_ids):
+        for box, score, class_id in zip(boxes, scores, class_ids):
+            x1, y1, x2, y2 = box
+            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.putText(img, f"ID: {class_id}, Score: {score:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        return img
