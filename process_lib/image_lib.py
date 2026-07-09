@@ -7,7 +7,7 @@ FFT_HIGHPASS = 0
 FFT_LOWPASS = 1
 
 # 颜色提取相关参数
-RED, GREEN, BLUE, WHITE, YELLOW, ORANGE, PURPLE, PINK, BROWN, GRAY = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9
+RED, GREEN, BLUE, WHITE, YELLOW, ORANGE, PURPLE, PINK, BROWN, GRAY, BLACK = 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
 
 RED_LOWER1 = np.array([0, 43, 46])
 RED_UPPER1 = np.array([10, 255, 255])
@@ -40,6 +40,9 @@ BROWN_UPPER = np.array([20, 200, 150])
 
 GRAY_LOWER = np.array([0, 0, 50])
 GRAY_UPPER = np.array([180, 50, 200])
+
+BLACK_LOWER = np.array([0, 0, 0])
+BLACK_UPPER = np.array([180, 150, 50])
 
 # 中心点计算相关参数
 CENTER_ALL = 0
@@ -243,6 +246,8 @@ def Color_Extraction(img, color=RED):
         mask = cv2.inRange(img_hsv, BROWN_LOWER, BROWN_UPPER)
     elif color == GRAY:
         mask = cv2.inRange(img_hsv, GRAY_LOWER, GRAY_UPPER)
+    elif color == BLACK:
+        mask = cv2.inRange(img_hsv, BLACK_LOWER, BLACK_UPPER)
     else:
         raise ValueError("不支持的颜色类型")
 
@@ -408,16 +413,20 @@ class YOLODetector:
         self.iou_thresh = iou_thresh
         self.imgsz = imgsz
         self.num_classes = num_classes
+        self.cores = cores
+        self.session = None
+        self.rknn = None
 
-        if method == "onnx":
+    def __enter__(self):
+        if self.method == "onnx":
             import onnxruntime as ort
             opts = ort.SessionOptions()
             opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-            if cores is not None:
-                opts.intra_op_num_threads = cores
+            if self.cores is not None:
+                opts.intra_op_num_threads = self.cores
             try:
-                self.session = ort.InferenceSession(model_path, sess_options=opts, providers=['CPUExecutionProvider'])
-            except ONNXRuntimeError as e:
+                self.session = ort.InferenceSession(self.model_path, sess_options=opts, providers=['CPUExecutionProvider'])
+            except ort.ONNXRuntimeError as e:
                 print(f"Error loading ONNX model: {e}")
                 raise RuntimeError("Failed to load ONNX model.")
             except Exception as e:
@@ -426,13 +435,22 @@ class YOLODetector:
             inp = self.session.get_inputs()[0]
             self.input_name = inp.name
             self.output_name = self.session.get_outputs()[0].name
-            dummy = np.zeros((1, 3, 224, 224), dtype=np.float32)
-            self.session.run([self.output_name], {self.input_name: dummy})
+        elif self.method == "rknn":
+            from rknnlite.api import RKNNLite
+            self.rknn = RKNNLite()
+            if self.rknn.load_rknn(self.model_path) != 0:
+                raise RuntimeError("Failed to load RKNN model.")
+            core_mask = getattr(RKNNLite, 'NPU_CORE_0_1_2', RKNNLite.NPU_CORE_0)
+            if self.rknn.init_runtime(core_mask=core_mask) != 0:
+                self.rknn.release()
+                raise RuntimeError("Failed to initialize RKNN runtime.")
         else:
-            raise ValueError("Unsupported method: {}".format(method))
+            raise ValueError("Unsupported method: {}".format(self.method))
+        
+        return self
 
     @staticmethod
-    def letterbox(img, target_size):
+    def letterbox_onnx(img, target_size):
         """保持长宽比缩放，并填充灰边(114)"""
         h, w = img.shape[:2]
         tw, th = target_size
@@ -446,7 +464,17 @@ class YOLODetector:
         return canvas, scale, (left, top)
     
     @staticmethod
-    def nms(boxes, scores, iou_thresh):
+    def letterbox_rknn(img, new_shape=640, color=(114, 114, 114)):
+        h, w = img.shape[:2]
+        scale = min(new_shape / h, new_shape / w)
+        nw, nh = int(w * scale), int(h * scale)
+        canvas = np.full((new_shape, new_shape, 3), color, dtype=np.uint8)
+        pad_w, pad_h = (new_shape - nw) // 2, (new_shape - nh) // 2
+        canvas[pad_h:pad_h + nh, pad_w:pad_w + nw] = cv2.resize(img, (nw, nh))
+        return canvas, scale, pad_w, pad_h
+
+    @staticmethod
+    def nms_onnx(boxes, scores, iou_thresh):
         """NMS算法"""
         x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
         areas = (x2 - x1) * (y2 - y1)
@@ -465,7 +493,24 @@ class YOLODetector:
         return keep
     
     @staticmethod
-    def postprocess(output, conf_thresh, iou_thresh, num_classes, scale, pad):
+    def nms_rknn(boxes, scores, iou_thresh):
+        x1, y1, x2, y2 = boxes[:, 0], boxes[:, 1], boxes[:, 2], boxes[:, 3]
+        areas = (x2 - x1).clip(min=0) * (y2 - y1).clip(min=0)
+        order = scores.argsort()[::-1]
+        keep = []
+        while order.size > 0:
+            i = order[0]
+            keep.append(i)
+            if order.size == 1: break
+            xx1, yy1 = np.maximum(x1[i], x1[order[1:]]), np.maximum(y1[i], y1[order[1:]])
+            xx2, yy2 = np.minimum(x2[i], x2[order[1:]]), np.minimum(y2[i], y2[order[1:]])
+            inter = (xx2 - xx1).clip(min=0) * (yy2 - yy1).clip(min=0)
+            iou = inter / (areas[i] + areas[order[1:]] - inter + 1e-6)
+            order = order[1:][iou < iou_thresh]
+        return keep
+
+    @staticmethod
+    def postprocess_onnx(output, conf_thresh, iou_thresh, num_classes, scale, pad):
         pred = output.squeeze(0).T  # [1, 12, 8400] -> [8400, 12]
         
         boxes = pred[:, :4]          # xywh (已经是 0-224 的绝对坐标)
@@ -484,7 +529,7 @@ class YOLODetector:
         y2 = boxes[:, 1] + boxes[:, 3] / 2
         boxes_xyxy = np.stack([x1, y1, x2, y2], axis=1)
 
-        keep = YOLODetector.nms(boxes_xyxy, scores, iou_thresh)
+        keep = YOLODetector.nms_onnx(boxes_xyxy, scores, iou_thresh)
         boxes_xyxy, scores, class_ids = boxes_xyxy[keep], scores[keep], class_ids[keep]
 
         # 映射回原图坐标 (减去 pad，除以 scale)
@@ -493,14 +538,41 @@ class YOLODetector:
         boxes_xyxy[:, [1, 3]] = (boxes_xyxy[:, [1, 3]] - pad_top) / scale
 
         return boxes_xyxy.astype(int), scores, class_ids
+
+    @staticmethod
+    def postprocess_rknn(outputs, scale, pad_w, pad_h, conf_thresh, iou_thresh):
+        pred = outputs[0][0].T 
+        boxes_xywh = pred[:, :4]
+        class_scores = pred[:, 4:]
+        scores = class_scores.max(axis=1)
+        class_ids = class_scores.argmax(axis=1)
+        mask = scores > conf_thresh
+        boxes_xywh, scores, class_ids = boxes_xywh[mask], scores[mask], class_ids[mask]
+        if len(boxes_xywh) == 0: return [], [], []
+        boxes_xyxy = np.zeros_like(boxes_xywh)
+        boxes_xyxy[:, 0] = boxes_xywh[:, 0] - boxes_xywh[:, 2] / 2
+        boxes_xyxy[:, 1] = boxes_xywh[:, 1] - boxes_xywh[:, 3] / 2
+        boxes_xyxy[:, 2] = boxes_xywh[:, 0] + boxes_xywh[:, 2] / 2
+        boxes_xyxy[:, 3] = boxes_xywh[:, 1] + boxes_xywh[:, 3] / 2
+        boxes_xyxy[:, [0, 2]] = (boxes_xyxy[:, [0, 2]] - pad_w) / scale
+        boxes_xyxy[:, [1, 3]] = (boxes_xyxy[:, [1, 3]] - pad_h) / scale
+        keep = YOLODetector.nms_rknn(boxes_xyxy, scores,iou_thresh)
+        return boxes_xyxy[keep].astype(np.int32), scores[keep], class_ids[keep]
     
     def detect(self, img):
-        img_lb, scale, pad = YOLODetector.letterbox(img, self.imgsz)
-        img_data = img_lb.astype(np.float32) / 255.0
-        img_data = img_data.transpose(2, 0, 1)[np.newaxis, :]  # [1, 3, H, W]
-        output = self.session.run([self.output_name], {self.input_name: img_data})[0]
-        boxes, scores, class_ids = YOLODetector.postprocess(output, self.conf_thresh, self.iou_thresh, self.num_classes, scale, pad)
-        return boxes, scores, class_ids
+        if self.method == "onnx":
+            img_lb, scale, pad = YOLODetector.letterbox_onnx(img, self.imgsz)
+            img_data = img_lb.astype(np.float32) / 255.0
+            img_data = img_data.transpose(2, 0, 1)[np.newaxis, :]  # [1, 3, H, W]
+            output = self.session.run([self.output_name], {self.input_name: img_data})[0]
+            boxes, scores, class_ids = YOLODetector.postprocess_onnx(output, self.conf_thresh, self.iou_thresh, self.num_classes, scale, pad)
+            return boxes, scores, class_ids
+        elif self.method == "rknn":
+            img, scale, pad_w, pad_h = YOLODetector.letterbox_rknn(img, self.imgsz[0])
+            input_tensor = np.expand_dims(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), axis=0)
+            outputs = self.rknn.inference(inputs=[input_tensor])
+            boxes, scores, cls_ids = YOLODetector.postprocess_rknn(outputs, scale, pad_w, pad_h, self.conf_thresh, self.iou_thresh)
+            return boxes, scores, cls_ids
 
     def draw_boxes(self, img, boxes, scores, class_ids):
         for box, score, class_id in zip(boxes, scores, class_ids):
@@ -508,3 +580,14 @@ class YOLODetector:
             cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
             cv2.putText(img, f"ID: {class_id}, Score: {score:.2f}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
         return img
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.method == "rknn" and self.rknn is not None:
+            self.rknn.release()
+            self.rknn = None
+        elif self.method == "onnx" and self.session is not None:
+            del self.session
+            self.session = None
+            import gc
+            gc.collect()
+        return False
