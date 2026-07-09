@@ -471,6 +471,9 @@ class ConfigManager:
     def get(self, key, default=None):
         return self.config_data.get(key, default)
 
+    def update(self):
+        self.load_config()
+
     def set_value(self, key, value, auto_save=True):
         self.config_data[key] = value
         if auto_save:
