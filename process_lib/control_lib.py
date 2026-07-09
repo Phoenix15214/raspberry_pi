@@ -3,6 +3,9 @@ import socket
 import serial
 import struct
 import time
+import os
+import json
+import tempfile
 from threading import Thread
 # PID相关函数
 
@@ -427,3 +430,51 @@ def Reorder_Vertex_Pole(vertices):
         sorted_vertices.append(vertices[index])
     sorted_vertices = np.array(sorted_vertices)
     return sorted_vertices
+
+# 文件化阈值保存
+class ConfigManager:
+    def __init__(self, config_file_path="config.json"):
+        self.config_file_path = config_file_path
+        self.config_data = {}
+        self.load_config()
+        
+    def load_config(self):
+        if not os.path.exists(self.config_file_path):
+            print("配置文件不存在,使用默认配置")
+            self.__set_default_value()
+            return
+        try:
+            with open(self.config_file_path, "r", encoding="utf-8") as f:
+                self.config_data = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            print("加载配置文件失败,使用默认配置")
+            self.__set_default_value()
+    
+    def save(self):
+        # 创建临时文件，方便进行原子写入，防止突发事件导致文件损坏
+        dir_path = os.path.dirname(self.config_file_path) or "."
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8", 
+            dir=dir_path, 
+            delete=False,
+            suffix=".tmp"
+        ) as tmp_file:
+            json.dump(self.config_data, tmp_file, ensure_ascii=False, indent=2)
+            tmp_path = tmp_file.name
+        
+        os.replace(tmp_path, self.config_file_path)
+    
+    def get(self, key, default=None):
+        return self.config_data.get(key, default)
+
+    def set_value(self, key, value, auto_save=True):
+        self.config_data[key] = value
+        if auto_save:
+            self.save()
+
+    def __set_default_value(self):
+        default_values = {}
+        for key, value in default_values.items():
+            self.set_value(key, value, auto_save=False)
+        self.save()
