@@ -6,6 +6,9 @@ import time
 import os
 import json
 import tempfile
+from multiprocessing import Process
+from multiprocessing.managers import SharedMemoryManager
+import multiprocessing.shared_memory as shared_memory
 from threading import Thread
 # PID相关函数
 
@@ -478,3 +481,44 @@ class ConfigManager:
         for key, value in default_values.items():
             self.set_value(key, value, auto_save=False)
         self.save()
+
+# 共享内存相关函数
+class MemoryShare:
+    def __init__(self, name, shape, dtype):
+        self.name = name
+        self.shape = shape
+        self.dtype = dtype
+        self.shm = None
+        self.data = None
+        self.create()
+
+    def create(self):
+        try:
+            self.shm = shared_memory.SharedMemory(name=self.name, create=True, size=np.prod(self.shape) * np.dtype(self.dtype).itemsize)
+        except FileExistsError:
+            self.shm = shared_memory.SharedMemory(name=self.name)
+        except Exception as e:
+            print(f"创建共享内存失败: {e}")
+            raise RuntimeError("共享内存创建失败。")
+        self.data = np.ndarray(self.shape, dtype=self.dtype, buffer=self.shm.buf)
+
+    def connect(self):
+        self.shm = shared_memory.SharedMemory(name=self.name)
+        self.data = np.ndarray(self.shape, dtype=self.dtype, buffer=self.shm.buf)
+
+    def read(self):
+        return self.data if self.data is not None else None
+
+    def write(self, data):
+        if self.data is not None:
+            np.copyto(self.data, data)
+        else:
+            raise ValueError("共享内存未创建或连接。")
+
+    def close(self):
+        try:
+            if self.shm is not None:
+                self.shm.close()
+                self.shm.unlink()
+        except FileNotFoundError:
+            pass
