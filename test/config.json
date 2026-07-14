@@ -1,7 +1,7 @@
 {
-  "angle_shift": 50,
-  "offset": 20,
-  "black_h": 180,
-  "black_s": 255,
+  "angle_shift": 60,
+  "offset": 23,
+  "black_h": 22,
+  "black_s": 263,
   "black_v": 100
 }

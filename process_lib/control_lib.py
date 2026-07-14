@@ -271,6 +271,17 @@ class SerialPacket:
                 print(f"发生未知错误：{e}")
                 self.isOpened = False
     
+    def send_char(self, data):
+        if self.isOpened:
+            try:
+                self.ser.write(data.encode("utf-8"))
+            except serial.SerialException as e:
+                print(f"串口发送数据失败，错误信息：{e}")
+                self.isOpened = False
+            except Exception as e:
+                print(f"发生未知错误：{e}")
+                self.isOpened = False
+    
     def __parse_buffer(self):
         while True:
             start = self.buffer.decode("utf-8").find(self.recv_header)
@@ -297,7 +308,7 @@ class SerialPacket:
         if clear:
             self.recv_data = []
         return recv_data
-    
+
     def parse_input(self, msg):
         start_flag = ":"
         start_pos = msg.find(start_flag)
@@ -470,6 +481,14 @@ class ConfigManager:
     
     def get(self, key, default=None):
         return self.config_data.get(key, default)
+
+    def get_all(self):
+        return self.config_data.copy()
+    
+    def del_data(self, key):
+        if key in self.config_data:
+            del self.config_data[key]
+            self.save()
 
     def update(self):
         self.load_config()
