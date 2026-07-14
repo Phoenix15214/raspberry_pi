@@ -293,11 +293,15 @@ class SerialPacket:
             self.recv_data.append(self.buffer[start + len(self.recv_header): end])
             self.buffer = self.buffer[end + len(self.recv_tail):]
         
-    def recv_packet(self):
+    def recv_packet(self, timeout=None):
+        if timeout is not None:
+            self.ser.timeout = timeout
         if self.isOpened and self.ser.in_waiting > 0:
             packet = self.ser.read(self.ser.in_waiting)
             self.buffer += packet
             self.__parse_buffer()
+            return True
+        return False
 
     def get_recv_data(self, clear=True):
         recv_data = self.recv_data
