@@ -217,9 +217,11 @@ class SerialPacket:
         except serial.SerialException as e:
             print(f"串口 {port} 打开失败，错误信息：{e}")
             self.isOpened = False
+            raise serial.SerialException(f"串口 {port} 打开失败，错误信息：{e}")
         except Exception as e:
             print(f"发生未知错误：{e}")
             self.isOpened = False
+            raise Exception(f"发生未知错误：{e}")
 
     def __clear_packet(self):
         self.send_data = bytearray()
