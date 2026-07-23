@@ -591,3 +591,32 @@ class YOLODetector:
             import gc
             gc.collect()
         return False
+
+
+def Sigmoid_Curve_Transform(image_gray, k=5.0, threshold=128):
+    """
+    带拐点控制的 S 形灰度映射（Sigmoid 型）
+    让低于阈值的像素更黑，高于阈值的像素更白
+
+    :param image_gray: 输入灰度图，uint8 类型，shape (H, W)
+    :param k: 陡峭系数，推荐 2.0 ~ 10.0，越大过渡越锐利
+    :param threshold: 拐点阈值（0~255），该灰度值处的输出正好为 128（中间灰）
+                      例如 threshold=150 表示只有大于150的才会变白，小于150的变黑
+    :return: 处理后的灰度图，uint8 类型
+    """
+    # 将阈值归一化到 [0,1]
+    T = np.clip(threshold / 255.0, 0.01, 0.99)  # 避免极端值导致数值不稳定
+
+    # 归一化像素值到 [0,1]
+    img_float = image_gray.astype(np.float32) / 255.0
+
+    # 计算 sigmoid 值
+    S = 1.0 / (1.0 + np.exp(-k * (img_float - T)))
+    # 端点归一化，保证输入 0 → 输出 0，输入 1 → 输出 1
+    S0 = 1.0 / (1.0 + np.exp(k * T))          # 对应 x=0
+    S1 = 1.0 / (1.0 + np.exp(-k * (1.0 - T))) # 对应 x=1
+    transformed = (S - S0) / (S1 - S0)
+
+    # 截断并转回 uint8
+    transformed = np.clip(transformed, 0.0, 1.0)
+    return (transformed * 255).astype(np.uint8)
