@@ -620,3 +620,17 @@ def Sigmoid_Curve_Transform(image_gray, k=5.0, threshold=128):
     # 截断并转回 uint8
     transformed = np.clip(transformed, 0.0, 1.0)
     return (transformed * 255).astype(np.uint8)
+
+def Sigmoid_Curve_Transform_LUT(image_gray, k=5.0, threshold=128):
+
+    T = np.clip(threshold / 255.0, 0.01, 0.99)
+    x = np.arange(256, dtype=np.float32) / 255.0
+    
+    S = 1.0 / (1.0 + np.exp(-k * (x - T)))
+    S0 = 1.0 / (1.0 + np.exp(k * T))
+    S1 = 1.0 / (1.0 + np.exp(-k * (1.0 - T)))
+    
+    lut = np.clip((S - S0) / (S1 - S0), 0.0, 1.0)
+    lut = (lut * 255).astype(np.uint8)  # 长度为256的数组
+
+    return cv2.LUT(image_gray, lut)

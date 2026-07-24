@@ -549,4 +549,6 @@ class MemoryShare:
                 self.shm.close()
                 self.shm.unlink()
         except FileNotFoundError:
-            pass
+            print("共享内存文件未找到。")
+        except Exception as e:
+            print(f"关闭共享内存时发生错误: {e}")
