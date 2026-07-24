@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import time
+import numexpr as ne
 
 # 傅里叶变换有关参数
 FFT_HIGHPASS = 0
@@ -634,3 +635,182 @@ def Sigmoid_Curve_Transform_LUT(image_gray, k=5.0, threshold=128):
     lut = (lut * 255).astype(np.uint8)  # 长度为256的数组
 
     return cv2.LUT(image_gray, lut)
+
+def Adaptive_Sigmoid_Transform(image_gray, grid_size=(8, 8), k_base=5.0, k_range=(1.0, 15.0)):
+    h, w = image_gray.shape
+    rows, cols = grid_size
+
+    step_h = h / rows
+    step_w = w / cols
+
+    T_grid = np.zeros((rows, cols), dtype=np.float32)
+    K_grid = np.zeros((rows, cols), dtype=np.float32)
+
+    for i in range(rows):
+        for j in range(cols):
+            y_start = int(i * step_h)
+            y_end = int((i + 1) * step_h)
+            x_start = int(j * step_w)
+            x_end = int((j + 1) * step_w)
+
+            tile = image_gray[y_start:min(y_end, h), x_start:min(x_end, w)]
+            if tile.size == 0:
+                continue
+
+            mean_val = np.mean(tile) / 255.0
+            std_val = np.std(tile) / 255.0
+
+            T_grid[i, j] = np.clip(mean_val, 0.01, 0.99)
+            local_k = k_base / (std_val + 0.01)
+            K_grid[i, j] = np.clip(local_k, k_range[0], k_range[1])
+
+    # 上采样到全图尺寸
+    T_map = cv2.resize(T_grid, (w, h), interpolation=cv2.INTER_LINEAR)
+    K_map = cv2.resize(K_grid, (w, h), interpolation=cv2.INTER_LINEAR)
+
+    x = image_gray.astype(np.float32) / 255.0
+
+    # ------------------ 使用 numexpr 并行计算 ------------------
+    # 构建局部变量字典，确保 numexpr 能准确访问所有变量
+    local_dict = {
+        'K_map': K_map,
+        'x': x,
+        'T_map': T_map
+    }
+
+    S = ne.evaluate("1.0 / (1.0 + exp(-K_map * (x - T_map)))", local_dict=local_dict)
+    S0 = ne.evaluate("1.0 / (1.0 + exp(K_map * T_map))", local_dict=local_dict)
+    S1 = ne.evaluate("1.0 / (1.0 + exp(-K_map * (1.0 - T_map)))", local_dict=local_dict)
+
+    local_dict['S'] = S
+    local_dict['S0'] = S0
+    local_dict['S1'] = S1
+    result = ne.evaluate("(S - S0) / (S1 - S0 + 1e-6)", local_dict=local_dict)
+
+    # numexpr 返回的 result 是连续数组，直接进行后续操作
+    result = np.clip(result, 0.0, 1.0) * 255.0
+    return result.astype(np.uint8)
+
+def Adaptive_Sigmoid_Transform_UMat(image_gray, grid_size=(8, 8), k_base=5.0, k_range=(1.0, 15.0)):
+    h, w = image_gray.shape
+    rows, cols = grid_size
+
+    step_h = h / rows
+    step_w = w / cols
+
+    T_grid = np.zeros((rows, cols), dtype=np.float32)
+    K_grid = np.zeros((rows, cols), dtype=np.float32)
+
+    for i in range(rows):
+        for j in range(cols):
+            y_start = int(i * step_h)
+            y_end = int((i + 1) * step_h)
+            x_start = int(j * step_w)
+            x_end = int((j + 1) * step_w)
+
+            tile = image_gray[y_start:min(y_end, h), x_start:min(x_end, w)]
+            if tile.size == 0:
+                continue
+
+            mean_val = np.mean(tile) / 255.0
+            std_val = np.std(tile) / 255.0
+
+            T_grid[i, j] = np.clip(mean_val, 0.01, 0.99)
+            K_grid[i, j] = np.clip(k_base / (std_val + 0.01), k_range[0], k_range[1])
+
+    T_map = cv2.resize(T_grid, (w, h), interpolation=cv2.INTER_LINEAR)
+    K_map = cv2.resize(K_grid, (w, h), interpolation=cv2.INTER_LINEAR)
+
+    img_f = image_gray.astype(np.float32) / 255.0
+
+    if cv2.ocl.haveOpenCL():
+        # 上传到 UMat（OpenCL 缓冲区）
+        img_u = cv2.UMat(img_f)
+        T_u = cv2.UMat(T_map)
+        K_u = cv2.UMat(K_map)
+
+        # 注意：所有 UMat 运算必须用 cv2 函数，不能使用 Python 的 - 运算符
+        diff = cv2.subtract(img_u, T_u)
+
+        # 原来 -K_map * diff → 现在分解为：(-1.0 * K_map) * diff
+        neg_K = cv2.multiply(K_u, -1.0)          # 先计算 -K_map
+        neg_K_diff = cv2.multiply(neg_K, diff)   # 再乘 diff
+        exp_val = cv2.exp(neg_K_diff)
+        S = cv2.divide(1.0, cv2.add(1.0, exp_val))
+
+        exp_KT = cv2.exp(cv2.multiply(K_u, T_u))
+        S0 = cv2.divide(1.0, cv2.add(1.0, exp_KT))
+
+        one_minus_T = cv2.subtract(1.0, T_u)
+        # 原本 -K_map * (1 - T) 也需要同样处理
+        exp_negK_oneMinusT = cv2.exp(cv2.multiply(neg_K, one_minus_T))
+        S1 = cv2.divide(1.0, cv2.add(1.0, exp_negK_oneMinusT))
+
+        num = cv2.subtract(S, S0)
+        denom = cv2.add(cv2.subtract(S1, S0), 1e-6)
+        res_u = cv2.divide(num, denom)
+
+        res_u = cv2.multiply(res_u, 255.0)
+        res = res_u.get()  # 取回 CPU 内存
+    else:
+        return Adaptive_Sigmoid_Transform(image_gray, grid_size, k_base, k_range)
+
+    res = np.clip(res, 0, 255).astype(np.uint8)
+    return res
+
+def Fast_Adaptive_Transform_CV(
+        image_gray,
+        block_size=64,
+        k_base=5.0
+    ):
+
+    img = image_gray.astype(np.float32) / 255.0
+
+    mean = cv2.boxFilter(
+        img,
+        -1,
+        (block_size, block_size)
+    )
+
+    sqr = cv2.multiply(img, img)
+
+    mean2 = cv2.boxFilter(
+        sqr,
+        -1,
+        (block_size, block_size)
+    )
+
+    var = cv2.subtract(
+        mean2,
+        cv2.multiply(mean, mean)
+    )
+
+    std = cv2.sqrt(var)
+
+    K = cv2.divide(
+        k_base,
+        cv2.add(std, 0.02)
+    )
+
+    x = cv2.multiply(
+        cv2.subtract(img, mean),
+        K
+    )
+
+    absx = cv2.absdiff(x, 0)
+
+    denom = cv2.add(absx, 1.0)
+
+    frac = cv2.divide(
+        x,
+        denom
+    )
+
+    y = cv2.add(
+        0.5,
+        cv2.multiply(frac, 0.5)
+    )
+
+    y = cv2.multiply(y, 255)
+
+    return np.clip(y,0,255).astype(np.uint8)
